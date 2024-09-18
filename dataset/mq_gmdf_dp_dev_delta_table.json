@@ -1,0 +1,33 @@
+{
+	"name": "mq_gmdf_dp_dev_delta_table",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "dev_dia_gmdf_DataBricksWrksp_01",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"DB_NAME": {
+				"type": "string"
+			},
+			"TB_NAME": {
+				"type": "string"
+			}
+		},
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"type": "AzureDatabricksDeltaLakeDataset",
+		"typeProperties": {
+			"database": {
+				"value": "@dataset().DB_NAME",
+				"type": "Expression"
+			},
+			"table": {
+				"value": "@dataset().TB_NAME",
+				"type": "Expression"
+			}
+		},
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

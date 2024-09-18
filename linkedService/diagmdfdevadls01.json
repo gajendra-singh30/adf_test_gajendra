@@ -1,0 +1,17 @@
+{
+	"name": "diagmdfdevadls01",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"type": "AzureBlobFS",
+		"typeProperties": {
+			"url": "https://diagmdfdevadls01.dfs.core.windows.net/"
+		},
+		"connectVia": {
+			"referenceName": "AutoResolveIntegrationRuntime",
+			"type": "IntegrationRuntimeReference"
+		}
+	}
+}

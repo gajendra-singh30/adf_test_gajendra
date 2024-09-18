@@ -1,0 +1,47 @@
+{
+	"name": "mq_gmdf_dp_dev_sqlserver_source",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "mq_gmdf_dp_dev_sqlserver_connection",
+			"type": "LinkedServiceReference",
+			"parameters": {
+				"server": {
+					"value": "@dataset().server",
+					"type": "Expression"
+				},
+				"database": {
+					"value": "@dataset().database",
+					"type": "Expression"
+				},
+				"username": {
+					"value": "@dataset().user",
+					"type": "Expression"
+				},
+				"secret": {
+					"value": "@dataset().secretname",
+					"type": "Expression"
+				}
+			}
+		},
+		"parameters": {
+			"server": {
+				"type": "string"
+			},
+			"database": {
+				"type": "string"
+			},
+			"user": {
+				"type": "string"
+			},
+			"secretname": {
+				"type": "string"
+			}
+		},
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"type": "SqlServerTable",
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

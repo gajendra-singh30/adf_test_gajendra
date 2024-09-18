@@ -1,0 +1,9 @@
+{
+	"name": "mq-dia-gmdf-dev-datafactory-01",
+	"location": "centralus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "8a842f67-30a3-458e-95fb-49ecba73cae6",
+		"tenantId": "18a59a81-eea8-4c30-948a-d8824cdc2580"
+	}
+}

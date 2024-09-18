@@ -1,0 +1,66 @@
+{
+	"name": "opic_dia_sink",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "opic_dia_sql_server_dev",
+			"type": "LinkedServiceReference",
+			"parameters": {
+				"server": {
+					"value": "@dataset().server",
+					"type": "Expression"
+				},
+				"database": {
+					"value": "@dataset().database",
+					"type": "Expression"
+				},
+				"username": {
+					"value": "@dataset().username",
+					"type": "Expression"
+				},
+				"secret": {
+					"value": "@dataset().secret",
+					"type": "Expression"
+				}
+			}
+		},
+		"parameters": {
+			"server": {
+				"type": "string"
+			},
+			"database": {
+				"type": "string"
+			},
+			"username": {
+				"type": "string"
+			},
+			"secret": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "SqlServerTable",
+		"schema": [
+			{
+				"name": "system_name",
+				"type": "nvarchar"
+			},
+			{
+				"name": "layer",
+				"type": "nvarchar"
+			},
+			{
+				"name": "result",
+				"type": "nvarchar"
+			},
+			{
+				"name": "dt",
+				"type": "nvarchar"
+			}
+		],
+		"typeProperties": {
+			"schema": "dbo",
+			"table": "ef_backfill"
+		}
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

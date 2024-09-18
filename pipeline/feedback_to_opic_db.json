@@ -1,0 +1,274 @@
+{
+	"name": "feedback_to_opic_db",
+	"properties": {
+		"activities": [
+			{
+				"name": "Copy Data to OPIC DB",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "Writing to ADLS",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "ParquetSource",
+						"storeSettings": {
+							"type": "AzureBlobFSReadSettings",
+							"recursive": true,
+							"wildcardFolderPath": "feedback-to-opic-db",
+							"wildcardFileName": "*.parquet",
+							"enablePartitionDiscovery": false
+						},
+						"formatSettings": {
+							"type": "ParquetReadSettings"
+						}
+					},
+					"sink": {
+						"type": "SqlServerSink",
+						"writeBehavior": "insert",
+						"sqlWriterUseTableLock": false
+					},
+					"enableStaging": false,
+					"translator": {
+						"type": "TabularTranslator",
+						"typeConversion": true,
+						"typeConversionSettings": {
+							"allowDataTruncation": true,
+							"treatBooleanAsNumber": false
+						}
+					}
+				},
+				"inputs": [
+					{
+						"referenceName": "opic_dia_parquet_adls",
+						"type": "DatasetReference",
+						"parameters": {
+							"filesystem": "osipi-ingestion-dev",
+							"directory": "feedback-to-opic-db",
+							"fileName": "*.parquet"
+						}
+					}
+				],
+				"outputs": [
+					{
+						"referenceName": "opic_dia_sink",
+						"type": "DatasetReference",
+						"parameters": {
+							"server": {
+								"value": "@pipeline().parameters.server",
+								"type": "Expression"
+							},
+							"database": {
+								"value": "@pipeline().parameters.database",
+								"type": "Expression"
+							},
+							"username": {
+								"value": "@pipeline().parameters.username",
+								"type": "Expression"
+							},
+							"secret": {
+								"value": "@pipeline().parameters.secret",
+								"type": "Expression"
+							}
+						}
+					}
+				]
+			},
+			{
+				"name": "Insert Log - Start",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''RUNNING'',''batch'', ''delta'')')\n",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Writing to ADLS",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "Insert Log - Start",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/Users/l075920-ca@llynet.com/OSI_PI_Data_Product/osipi_ingestion_process/Notebooks/4.feedback_to_opic_db",
+					"baseParameters": {
+						"database": "conform",
+						"catalog": "mq_gmdf_dev",
+						"storage_name": "diagmdfdevadls01",
+						"container": "mqgmdfdev",
+						"run_id": {
+							"value": "@pipeline().RunId",
+							"type": "Expression"
+						},
+						"etl_job": {
+							"value": "@pipeline().Pipeline",
+							"type": "Expression"
+						},
+						"global_log_table": "global_execution"
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "dev_dia_gmdf_DataBricksWrksp_01_nb",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Insert Log - End",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Copy Data to OPIC DB",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''COMPLETED'',''batch'', ''delta'')')\n",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Insert Log - Fail",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Copy Data to OPIC DB",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''ERROR'',''batch'', ''delta'')')\n",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Fail1",
+				"type": "Fail",
+				"dependsOn": [
+					{
+						"activity": "Insert Log - Fail",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"message": "Writing to OPIC SQL DB Failed",
+					"errorCode": "500"
+				}
+			}
+		],
+		"parameters": {
+			"server": {
+				"type": "string"
+			},
+			"database": {
+				"type": "string"
+			},
+			"username": {
+				"type": "string"
+			},
+			"secret": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-09-10T10:20:12Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

@@ -1,0 +1,6 @@
+{
+	"name": "mq-dev-gmdf-ir-z1-cluster",
+	"properties": {
+		"type": "SelfHosted"
+	}
+}

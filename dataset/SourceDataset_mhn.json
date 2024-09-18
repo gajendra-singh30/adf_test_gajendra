@@ -1,0 +1,17 @@
+{
+	"name": "SourceDataset_mhn",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "cdw_test",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "OracleTable",
+		"schema": [],
+		"typeProperties": {
+			"schema": "CDW_OWNER",
+			"table": "CDW_CMPLNT"
+		}
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

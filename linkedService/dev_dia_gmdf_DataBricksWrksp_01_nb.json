@@ -1,0 +1,32 @@
+{
+	"name": "dev_dia_gmdf_DataBricksWrksp_01_nb",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"type": "AzureDatabricks",
+		"typeProperties": {
+			"domain": "https://adb-6777798819429555.15.azuredatabricks.net",
+			"authentication": "MSI",
+			"workspaceResourceId": "/subscriptions/47c9e66e-5bee-4111-adee-44d9cf5d9d43/resourceGroups/dev-databricks-rg/providers/Microsoft.Databricks/workspaces/dev-dia-gmdf-DataBricksWrksp-01",
+			"newClusterNodeType": "Standard_F8",
+			"newClusterNumOfWorker": "2:8",
+			"newClusterSparkConf": {
+				"spark.databricks.delta.preview.enabled": "true"
+			},
+			"newClusterSparkEnvVars": {
+				"PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+			},
+			"newClusterVersion": "12.2.x-scala2.12",
+			"newClusterDriverNodeType": "Standard_F8",
+			"clusterOption": "Autoscaling",
+			"newClusterInitScripts": [],
+			"dataSecurityMode": "SINGLE_USER"
+		},
+		"connectVia": {
+			"referenceName": "mq-dev-gmdf-ir-z1-cluster",
+			"type": "IntegrationRuntimeReference"
+		}
+	}
+}

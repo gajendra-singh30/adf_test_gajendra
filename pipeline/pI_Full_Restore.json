@@ -1,0 +1,359 @@
+{
+	"name": "pI_Full_Restore",
+	"properties": {
+		"activities": [
+			{
+				"name": "Full Restore",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "Insert Log - Start",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.01:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/Workspace/Repos/azure-direct-ingestion/mq-dia-azr-direct-ingestion/notebook/full-restore",
+					"baseParameters": {
+						"landing_schema": "landing",
+						"refine_schema": "refine",
+						"raw_schema": "raw",
+						"catalog": "mq_gmdf_dev",
+						"refine_cnf": "refine_tables_cnf",
+						"source_cnf": "source_systems_cnf",
+						"container": "mqgmdfdev",
+						"databricks_mounted_path": "mqgmdfdev",
+						"n_workers": "10",
+						"etl_job": "azure-direct-ingestion-full-restore",
+						"r_src_id": {
+							"value": "@pipeline().parameters.r_src_id",
+							"type": "Expression"
+						},
+						"tables": {
+							"value": "@if(empty(pipeline().parameters.tables),'all', pipeline().parameters.tables)",
+							"type": "Expression"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "dev_dia_gmdf_DataBricksWrksp_01_nb",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Full Source to Raw",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "Full Restore",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "pI_Source_to_Raw",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true,
+					"parameters": {
+						"r_src_id": {
+							"value": "@pipeline().parameters.r_src_id",
+							"type": "Expression"
+						},
+						"mode": "full",
+						"src_cd": {
+							"value": "@pipeline().parameters.src_cd",
+							"type": "Expression"
+						},
+						"launch": {
+							"value": "@pipeline().parameters.launch",
+							"type": "Expression"
+						},
+						"tables": {
+							"value": "@pipeline().parameters.tables",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "Raw to Refine",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "Full Source to Raw",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 1,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/Workspace/Repos/azure-direct-ingestion/mq-dia-azr-direct-ingestion/notebook/raw-to-refine",
+					"baseParameters": {
+						"adf_run_id": {
+							"value": "@pipeline().RunId",
+							"type": "Expression"
+						},
+						"run_id": "{{run_id}}",
+						"refine_schema": "refine",
+						"etl_job": "azure-direct-ingestion-refine",
+						"raw_schema": "raw",
+						"catalog": "mq_gmdf_dev",
+						"refine_cnf": "refine_tables_cnf",
+						"ref_execution_table": "ref_execution",
+						"n_workers": "10",
+						"source_cnf": "source_systems_cnf",
+						"run_id_recalc": "False",
+						"mode": "full",
+						"r_src_id": {
+							"value": "@pipeline().parameters.r_src_id",
+							"type": "Expression"
+						},
+						"tables": {
+							"value": "@if(empty(pipeline().parameters.tables),'all', pipeline().parameters.tables)",
+							"type": "Expression"
+						},
+						"subscription_id": "47c9e66e-5bee-4111-adee-44d9cf5d9d43",
+						"resource_group": "dev-storage-rg",
+						"container": "mqgmdfdev",
+						"databricks_mounted_path": "mqgmdfdev",
+						"storage_account": "diagmdfdevadls01",
+						"scheduling": {
+							"value": "@pipeline().parameters.launch",
+							"type": "Expression"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "dev_dia_gmdf_DataBricksWrksp_01_nb",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Insert Log - Start",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 1,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',pipeline().RunId,''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', getdate(),''RUNNING'',''','full-restore',''',''',pipeline().parameters.launch,''',''',''',NULL,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					}
+				}
+			},
+			{
+				"name": "Update Log - End",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Raw to Refine",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',concat(pipeline().RunId,'_', split(activity('Raw to Refine').output.runPageUrl, 'run/')[1]),''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''COMPLETED'',''','full-restore',''',''',pipeline().parameters.launch,''',getdate(),NULL,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Update Log - End SourceToRaw Failed",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Full Source to Raw",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',pipeline().RunId,''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''ERROR'',''','full-restore',''',''',pipeline().parameters.launch,''',getdate(),0,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Update Log - End Failed",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Raw to Refine",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',concat(pipeline().RunId,'_', split(activity('Raw to Refine').output.runPageUrl, 'run/')[1]),''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''ERROR'',''','full-restore',''',''',pipeline().parameters.launch,''',getdate(),0,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Update Log - End FullRestore Failed",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Full Restore",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',concat(pipeline().RunId,'_', split(activity('Full Restore').output.runPageUrl, 'run/')[1]),''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''ERROR'',''','full-restore',''',''',pipeline().parameters.launch,''',getdate(),0,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			}
+		],
+		"parameters": {
+			"r_src_id": {
+				"type": "string"
+			},
+			"tables": {
+				"type": "string"
+			},
+			"src_cd": {
+				"type": "string"
+			},
+			"launch": {
+				"type": "string",
+				"defaultValue": "manual"
+			}
+		},
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"lastPublishTime": "2024-08-14T10:31:33Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

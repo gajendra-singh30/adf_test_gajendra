@@ -1,0 +1,1333 @@
+{
+	"name": "pI_Source_to_Raw",
+	"properties": {
+		"activities": [
+			{
+				"name": "ForEach",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Get List of Tables",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "If Multi-Host",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('Get List of Tables').output.value",
+						"type": "Expression"
+					},
+					"isSequential": false,
+					"batchCount": 10,
+					"activities": [
+						{
+							"name": "Insert Table Log - Start",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.00:10:00",
+								"retry": 1,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureDatabricksDeltaLakeSource",
+									"query": {
+										"value": "@concat('INSERT INTO refine.ref_execution VALUES (''',pipeline().RunId,''', ''azure-direct-ingestion-landing'',',pipeline().parameters.r_src_id,', current_timestamp(), ''RUNNING'',''',pipeline().parameters.mode,''',''',item().FULL_TABLE_NAME,''','''','''','''',NULL',',NULL',',NULL',',NULL',','''')')",
+										"type": "Expression"
+									}
+								},
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_delta_table",
+									"type": "DatasetReference",
+									"parameters": {
+										"DB_NAME": "refine",
+										"TB_NAME": "ref_execution"
+									}
+								}
+							}
+						},
+						{
+							"name": "If Condition Delta",
+							"type": "IfCondition",
+							"dependsOn": [
+								{
+									"activity": "If Condition Full or Delta",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@and(equals(pipeline().parameters.mode, 'delta'),not(equals(activity('Check Rows Count').output.value[0].ROW_COUNT, 0)))",
+									"type": "Expression"
+								},
+								"ifTrueActivities": [
+									{
+										"name": "Table Delta Flow",
+										"type": "Copy",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.01:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "SqlServerSource",
+												"sqlReaderQuery": {
+													"value": "@concat('DECLARE @extraction_time DATETIME, @from_lsn binary(10), @to_lsn binary(10); \nSET @extraction_time = ''', string(activity('Get Last Execution Tmstmp').output.value[0].last_execution_tmstmp), ''';\nSET @from_lsn = sys.fn_cdc_map_time_to_lsn(''smallest greater than or equal'', @extraction_time);\nSET @to_lsn = sys.fn_cdc_map_time_to_lsn(''largest less than or equal'', GETDATE());\nSELECT convert(varchar, sys.fn_cdc_map_lsn_to_time(__$start_lsn), 121) as cdc_tmstmp, ', if(not(empty(activity('Get Columns to Keep').output.value[0].column_name)), concat('\"__$operation\",',activity('Get Columns to Keep').output.value[0].column_name),'*'),' FROM cdc.fn_cdc_get_all_changes_dbo_', item().SRC_TABLE_NAME, '(@from_lsn, @to_lsn, ''all'')')",
+													"type": "Expression"
+												},
+												"queryTimeout": "01:00:00",
+												"partitionOption": "None"
+											},
+											"sink": {
+												"type": "ParquetSink",
+												"storeSettings": {
+													"type": "AzureBlobFSWriteSettings"
+												},
+												"formatSettings": {
+													"type": "ParquetWriteSettings"
+												}
+											},
+											"enableStaging": false,
+											"translator": {
+												"type": "TabularTranslator",
+												"typeConversion": true,
+												"typeConversionSettings": {
+													"allowDataTruncation": true,
+													"treatBooleanAsNumber": false
+												}
+											}
+										},
+										"inputs": [
+											{
+												"referenceName": "mq_gmdf_dp_dev_sqlserver_source",
+												"type": "DatasetReference",
+												"parameters": {
+													"server": {
+														"value": "@variables('host')",
+														"type": "Expression"
+													},
+													"database": {
+														"value": "@item().R_SRC_DATABASE_CD",
+														"type": "Expression"
+													},
+													"user": {
+														"value": "@activity('Get Source Information').output.firstRow.R_USERNAME",
+														"type": "Expression"
+													},
+													"secretname": {
+														"value": "@activity('Get Source Information').output.firstRow.R_SECRET_NAME",
+														"type": "Expression"
+													}
+												}
+											}
+										],
+										"outputs": [
+											{
+												"referenceName": "mq_gmdf_dp_dev_parquet_sink",
+												"type": "DatasetReference",
+												"parameters": {
+													"FOLDER": {
+														"value": "@concat(split(replace(activity('Get Source Information').output.firstRow.R_SRC_SERVER_CD, '@', '_'), '\\')[0], '/dbo/', item().SRC_TABLE_NAME, '/',formatDateTime(utcNow(),'yyyyMMdd-HHmmssfff'), '.parquet')",
+														"type": "Expression"
+													},
+													"SRC_SYSTEM": {
+														"value": "@activity('Get Source Information').output.firstRow.R_MAIN_KEY_NAME",
+														"type": "Expression"
+													}
+												}
+											}
+										]
+									},
+									{
+										"name": "Append Table Delta Success",
+										"type": "AppendVariable",
+										"dependsOn": [
+											{
+												"activity": "Table Delta Flow",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "delta_table",
+											"value": {
+												"value": "@item().SRC_TABLE_NAME",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Append Table Delta Failed",
+										"type": "AppendVariable",
+										"dependsOn": [
+											{
+												"activity": "Table Delta Flow",
+												"dependencyConditions": [
+													"Failed"
+												]
+											}
+										],
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "failed_delta_table",
+											"value": {
+												"value": "@item().SRC_TABLE_NAME",
+												"type": "Expression"
+											}
+										}
+									}
+								]
+							}
+						},
+						{
+							"name": "If Condition Full or Delta",
+							"type": "IfCondition",
+							"dependsOn": [
+								{
+									"activity": "Get Columns to Keep",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@equals(pipeline().parameters.mode,'delta')",
+									"type": "Expression"
+								},
+								"ifFalseActivities": [
+									{
+										"name": "Check Rows Count Full",
+										"type": "Lookup",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.00:10:00",
+											"retry": 1,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "SqlServerSource",
+												"sqlReaderQuery": {
+													"value": "@concat('SELECT count(*) as ROW_COUNT FROM ',item().R_SRC_DATABASE_CD,'.dbo.',item().SRC_TABLE_NAME)",
+													"type": "Expression"
+												},
+												"queryTimeout": "00:10:00",
+												"partitionOption": "None"
+											},
+											"dataset": {
+												"referenceName": "mq_gmdf_dp_dev_sqlserver_source",
+												"type": "DatasetReference",
+												"parameters": {
+													"server": {
+														"value": "@variables('host')",
+														"type": "Expression"
+													},
+													"database": {
+														"value": "@item().R_SRC_DATABASE_CD",
+														"type": "Expression"
+													},
+													"user": {
+														"value": "@activity('Get Source Information').output.firstRow.R_USERNAME",
+														"type": "Expression"
+													},
+													"secretname": {
+														"value": "@activity('Get Source Information').output.firstRow.R_SECRET_NAME",
+														"type": "Expression"
+													}
+												}
+											},
+											"firstRowOnly": false
+										}
+									}
+								],
+								"ifTrueActivities": [
+									{
+										"name": "Get Last Execution Tmstmp",
+										"type": "Lookup",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.00:10:00",
+											"retry": 1,
+											"retryIntervalInSeconds": 45,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "AzureDatabricksDeltaLakeSource",
+												"query": {
+													"value": "@concat('select coalesce(max(t1.start_tmstmp),''1970-01-01 00:00:00.001'') AS last_execution_tmstmp from refine.ref_execution t1 JOIN refine.ref_execution t2 ON t1.run_id=t2.run_id AND t1.table_cd=t2.table_cd where t2.load_status_cd in (''COMPLETED'',''NO_NEW_DATA'') and t1.load_status_cd = ''RUNNING'' and t1.etl_job = ''azure-direct-ingestion-landing'' and t1.table_cd = ''', item().FULL_TABLE_NAME,''' and t1.r_src_id =', pipeline().parameters.r_src_id)",
+													"type": "Expression"
+												}
+											},
+											"dataset": {
+												"referenceName": "mq_gmdf_dp_dev_delta_table",
+												"type": "DatasetReference",
+												"parameters": {
+													"DB_NAME": "refine",
+													"TB_NAME": "ref_execution"
+												}
+											},
+											"firstRowOnly": false
+										}
+									},
+									{
+										"name": "Check Rows Count",
+										"type": "Lookup",
+										"dependsOn": [
+											{
+												"activity": "Get Last Execution Tmstmp",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"timeout": "0.00:10:00",
+											"retry": 1,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "SqlServerSource",
+												"sqlReaderQuery": {
+													"value": "@concat('DECLARE @extraction_time DATETIME, @from_lsn binary(10), @to_lsn binary(10); \nSET @extraction_time = ''', string(activity('Get Last Execution Tmstmp').output.value[0].last_execution_tmstmp), ''';\nSET @from_lsn = sys.fn_cdc_map_time_to_lsn(''smallest greater than or equal'', @extraction_time);\nSET @to_lsn = sys.fn_cdc_map_time_to_lsn(''largest less than or equal'', GETDATE());\nSELECT count(*) AS ROW_COUNT FROM cdc.fn_cdc_get_all_changes_dbo_', item().SRC_TABLE_NAME, '(@from_lsn, @to_lsn, ''all'')')",
+													"type": "Expression"
+												},
+												"queryTimeout": "00:10:00",
+												"partitionOption": "None"
+											},
+											"dataset": {
+												"referenceName": "mq_gmdf_dp_dev_sqlserver_source",
+												"type": "DatasetReference",
+												"parameters": {
+													"server": {
+														"value": "@variables('host')",
+														"type": "Expression"
+													},
+													"database": {
+														"value": "@item().R_SRC_DATABASE_CD",
+														"type": "Expression"
+													},
+													"user": {
+														"value": "@activity('Get Source Information').output.firstRow.R_USERNAME",
+														"type": "Expression"
+													},
+													"secretname": {
+														"value": "@activity('Get Source Information').output.firstRow.R_SECRET_NAME",
+														"type": "Expression"
+													}
+												}
+											},
+											"firstRowOnly": false
+										}
+									}
+								]
+							}
+						},
+						{
+							"name": "Get Columns to Keep",
+							"type": "Lookup",
+							"dependsOn": [
+								{
+									"activity": "Insert Table Log - Start",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.00:10:00",
+								"retry": 1,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureDatabricksDeltaLakeSource",
+									"query": {
+										"value": "@concat('select concat_ws('','', collect_list(concat(''\"'', column_name,''\"''))) as column_name from refine.columns_to_keep where table_name=''',item().SRC_TABLE_NAME,''' and r_src_id=',pipeline().parameters.r_src_id)",
+										"type": "Expression"
+									}
+								},
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_delta_table",
+									"type": "DatasetReference",
+									"parameters": {
+										"DB_NAME": "refine",
+										"TB_NAME": "columns_to_keep"
+									}
+								},
+								"firstRowOnly": false
+							}
+						},
+						{
+							"name": "If Condition Full",
+							"type": "IfCondition",
+							"dependsOn": [
+								{
+									"activity": "If Condition Delta",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@and(equals(pipeline().parameters.mode, 'full'), not(equals(activity('Check Rows Count Full').output.value[0].ROW_COUNT, 0)))",
+									"type": "Expression"
+								},
+								"ifTrueActivities": [
+									{
+										"name": "Table Full flow",
+										"type": "Copy",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.01:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "SqlServerSource",
+												"sqlReaderQuery": {
+													"value": "@concat('SELECT ''1970-01-01 00:00:00.000001'' as cdc_tmstmp, NULL as __$operation, ', if(not(empty(activity('Get Columns to Keep').output.value[0].column_name)), activity('Get Columns to Keep').output.value[0].column_name,'*'),' FROM ',item().R_SRC_DATABASE_CD,'.dbo.',item().SRC_TABLE_NAME)",
+													"type": "Expression"
+												},
+												"queryTimeout": "01:00:00",
+												"partitionOption": "None"
+											},
+											"sink": {
+												"type": "ParquetSink",
+												"storeSettings": {
+													"type": "AzureBlobFSWriteSettings"
+												},
+												"formatSettings": {
+													"type": "ParquetWriteSettings"
+												}
+											},
+											"enableStaging": false,
+											"translator": {
+												"type": "TabularTranslator",
+												"typeConversion": true,
+												"typeConversionSettings": {
+													"allowDataTruncation": true,
+													"treatBooleanAsNumber": false
+												}
+											}
+										},
+										"inputs": [
+											{
+												"referenceName": "mq_gmdf_dp_dev_sqlserver_source",
+												"type": "DatasetReference",
+												"parameters": {
+													"server": {
+														"value": "@variables('host')",
+														"type": "Expression"
+													},
+													"database": {
+														"value": "@item().R_SRC_DATABASE_CD",
+														"type": "Expression"
+													},
+													"user": {
+														"value": "@activity('Get Source Information').output.firstRow.R_USERNAME",
+														"type": "Expression"
+													},
+													"secretname": {
+														"value": "@activity('Get Source Information').output.firstRow.R_SECRET_NAME",
+														"type": "Expression"
+													}
+												}
+											}
+										],
+										"outputs": [
+											{
+												"referenceName": "mq_gmdf_dp_dev_parquet_sink",
+												"type": "DatasetReference",
+												"parameters": {
+													"FOLDER": {
+														"value": "@concat(split(replace(activity('Get Source Information').output.firstRow.R_SRC_SERVER_CD, '@', '_'), '\\')[0], '/dbo/', item().SRC_TABLE_NAME,'/','LOAD00000000.parquet')",
+														"type": "Expression"
+													},
+													"SRC_SYSTEM": {
+														"value": "@activity('Get Source Information').output.firstRow.R_MAIN_KEY_NAME",
+														"type": "Expression"
+													}
+												}
+											}
+										]
+									},
+									{
+										"name": "Append Table Full Success",
+										"type": "AppendVariable",
+										"dependsOn": [
+											{
+												"activity": "Table Full flow",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "delta_table",
+											"value": {
+												"value": "@item().SRC_TABLE_NAME",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Append Table Full Failed",
+										"type": "AppendVariable",
+										"dependsOn": [
+											{
+												"activity": "Table Full flow",
+												"dependencyConditions": [
+													"Failed"
+												]
+											}
+										],
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "failed_delta_table",
+											"value": {
+												"value": "@item().SRC_TABLE_NAME",
+												"type": "Expression"
+											}
+										}
+									}
+								]
+							}
+						},
+						{
+							"name": "If Condition NoData",
+							"type": "IfCondition",
+							"dependsOn": [
+								{
+									"activity": "If Condition Full",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@if(equals(pipeline().parameters.mode, 'delta'), equals(activity('Check Rows Count').output.value[0].ROW_COUNT, 0),equals(activity('Check Rows Count Full').output.value[0].ROW_COUNT, 0))",
+									"type": "Expression"
+								},
+								"ifTrueActivities": [
+									{
+										"name": "Update Table Log - End NoDelta",
+										"type": "Lookup",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.00:10:00",
+											"retry": 4,
+											"retryIntervalInSeconds": 45,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "AzureDatabricksDeltaLakeSource",
+												"query": {
+													"value": "@concat('INSERT INTO refine.ref_execution VALUES (''',pipeline().RunId,''', ''azure-direct-ingestion-landing'',',pipeline().parameters.r_src_id,','''', ''NO_NEW_DATA'',''',pipeline().parameters.mode,''',''',item().FULL_TABLE_NAME,''', current_timestamp(),'''','''',NULL',',NULL',',NULL',',NULL',','''')')",
+													"type": "Expression"
+												}
+											},
+											"dataset": {
+												"referenceName": "mq_gmdf_dp_dev_delta_table",
+												"type": "DatasetReference",
+												"parameters": {
+													"DB_NAME": "refine",
+													"TB_NAME": "ref_execution"
+												}
+											}
+										}
+									}
+								]
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Check Running Pipeline",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 1,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('select run_id,r_src_id,start_tmstmp,load_status_cd from ( select g1.run_id, g1.r_src_id, g1.start_tmstmp, g1.load_status_cd from refine.global_execution g1 join refine.global_execution g2 on g1.run_id = split_part(g2.run_id, ''_'', 1) and g1.r_src_id=g2.r_src_id and g1.etl_job=g2.etl_job where g1.r_src_id =',pipeline().parameters.r_src_id,' and g1.etl_job=''',pipeline().Pipeline,''' and g1.load_status_cd= ''RUNNING'') tb group by run_id,r_src_id,start_tmstmp,load_status_cd having count(*)=1 order by start_tmstmp desc')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Fail Current Pipeline",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Check Running Pipeline",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@if(equals(activity('Check Running Pipeline').output.count,0),false, true)",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "Fail",
+							"type": "Fail",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"message": {
+									"value": "@concat('There is already a running pipeline for the same input: ', activity('Check Running Pipeline').output.value[0].run_id)",
+									"type": "Expression"
+								},
+								"errorCode": "500"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Insert Log - Start",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Fail Current Pipeline",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 1,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',pipeline().RunId,''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', getdate(),''RUNNING'',''',pipeline().parameters.mode,''',''',pipeline().parameters.launch,''',''',''',NULL,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					}
+				}
+			},
+			{
+				"name": "Get Source Information",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Insert Log - Start",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('select * from refine.source_systems_cnf where r_src_id =', pipeline().parameters.r_src_id, ' and direct_ingestion_enabled=True')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "source_systems_cnf"
+						}
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "Get List of Tables",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Insert Log - Start",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('select * from refine.refine_tables_cnf where aws_replication_enabled=false and r_src_id =', pipeline().parameters.r_src_id, if(empty(pipeline().parameters.tables), '', concat(' and src_table_name in (''', join(split(pipeline().parameters.tables,','),''','''), ''')')))",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "refine_tables_cnf"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "If Multi-Host",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Get Source Information",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@contains(activity('Get Source Information').output.firstRow.R_SRC_SERVER_CD, '@')",
+						"type": "Expression"
+					},
+					"ifFalseActivities": [
+						{
+							"name": "Set Single-Host variable",
+							"type": "SetVariable",
+							"dependsOn": [],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "host",
+								"value": {
+									"value": "@activity('Get Source Information').output.firstRow.R_SRC_SERVER_CD",
+									"type": "Expression"
+								}
+							}
+						}
+					],
+					"ifTrueActivities": [
+						{
+							"name": "Set Multi-Host variable",
+							"type": "SetVariable",
+							"dependsOn": [],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "host",
+								"value": {
+									"value": "@split(activity('Get Source Information').output.firstRow.R_SRC_SERVER_CD, '@')[1]",
+									"type": "Expression"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "ForEach Failed Table Log",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "ForEach",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@variables('failed_delta_table')",
+						"type": "Expression"
+					},
+					"batchCount": 5,
+					"activities": [
+						{
+							"name": "Update Table Log - End Failed",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.00:10:00",
+								"retry": 4,
+								"retryIntervalInSeconds": 45,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureDatabricksDeltaLakeSource",
+									"query": {
+										"value": "@concat('INSERT INTO refine.ref_execution VALUES (''',pipeline().RunId,''', ''azure-direct-ingestion-landing'',',pipeline().parameters.r_src_id,','''', ''ERROR'',''',pipeline().parameters.mode,''',''',concat(toUpper(pipeline().parameters.src_cd),'_',item()),''', current_timestamp(),'''','''',NULL',',NULL',',NULL',',NULL',','''')')",
+										"type": "Expression"
+									}
+								},
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_delta_table",
+									"type": "DatasetReference",
+									"parameters": {
+										"DB_NAME": "refine",
+										"TB_NAME": "ref_execution"
+									}
+								}
+							}
+						},
+						{
+							"name": "Delete Files",
+							"type": "Delete",
+							"dependsOn": [
+								{
+									"activity": "Update Table Log - End Failed",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.01:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_parquet_sink",
+									"type": "DatasetReference",
+									"parameters": {
+										"FOLDER": "*.parquet",
+										"SRC_SYSTEM": {
+											"value": "@concat(activity('Get Source Information').output.firstRow.R_MAIN_KEY_NAME,'/',split(replace(activity('Get Source Information').output.firstRow.R_SRC_SERVER_CD, '@', '_'), '\\')[0], '/dbo/',item())",
+											"type": "Expression"
+										}
+									}
+								},
+								"logStorageSettings": {
+									"linkedServiceName": {
+										"referenceName": "diagmdfdevadls01",
+										"type": "LinkedServiceReference"
+									},
+									"path": {
+										"value": "@concat('mqgmdfdev/integration_logs/azure-direct-ingestion-landing/',formatDateTime(utcNow(),'yyyy-MM-dd'),'/', toUpper(item()))",
+										"type": "Expression"
+									}
+								},
+								"enableLogging": true,
+								"storeSettings": {
+									"type": "AzureBlobFSReadSettings",
+									"recursive": false,
+									"wildcardFileName": "*.parquet",
+									"enablePartitionDiscovery": false
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Update Log - End Failed_FEach",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "ForEach Failed Table Log",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 45,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',pipeline().RunId,''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''ERROR'',''',pipeline().parameters.mode,''',''',pipeline().parameters.launch,''',getdate(),0,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Update Log - End Failed",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "ForEach Failed Table Log",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',pipeline().RunId,''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''ERROR'',''',pipeline().parameters.mode,''',''',pipeline().parameters.launch,''',getdate(),0,'''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEach Succeeded Table",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "ForEach",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@variables('delta_table')",
+						"type": "Expression"
+					},
+					"batchCount": 5,
+					"activities": [
+						{
+							"name": "Update Table Log - End",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.00:10:00",
+								"retry": 4,
+								"retryIntervalInSeconds": 45,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureDatabricksDeltaLakeSource",
+									"query": {
+										"value": "@concat('INSERT INTO refine.ref_execution VALUES (''',pipeline().RunId,''', ''azure-direct-ingestion-landing'',',pipeline().parameters.r_src_id,','''', ''COMPLETED'',''',pipeline().parameters.mode,''',''',concat(toUpper(pipeline().parameters.src_cd),'_',item()),''', current_timestamp(),'''','''',NULL',',NULL',',NULL',',NULL',','''')')",
+										"type": "Expression"
+									}
+								},
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_delta_table",
+									"type": "DatasetReference",
+									"parameters": {
+										"DB_NAME": "refine",
+										"TB_NAME": "ref_execution"
+									}
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Update Log - End SuccFEach Failed",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "ForEach Succeeded Table",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:10:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',pipeline().RunId,''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''COMPLETED'',''',pipeline().parameters.mode,''',''',pipeline().parameters.launch,''',getdate(),',activity('Get List of Tables').output.count,','''')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "refine",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "If Condition New Data",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "ForEach Succeeded Table",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@not(empty(variables('delta_table')))",
+						"type": "Expression"
+					},
+					"ifFalseActivities": [
+						{
+							"name": "Update Log - End_NoData",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.00:10:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureDatabricksDeltaLakeSource",
+									"query": {
+										"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',pipeline().RunId,''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''NO_NEW_DATA'',''',pipeline().parameters.mode,''',''',pipeline().parameters.launch,''',getdate(),',activity('Get List of Tables').output.count,','''')')",
+										"type": "Expression"
+									}
+								},
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_delta_table",
+									"type": "DatasetReference",
+									"parameters": {
+										"DB_NAME": "refine",
+										"TB_NAME": "global_execution"
+									}
+								},
+								"firstRowOnly": false
+							}
+						}
+					],
+					"ifTrueActivities": [
+						{
+							"name": "Landing to Raw",
+							"type": "DatabricksNotebook",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.06:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 60,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"notebookPath": "/Workspace/Repos/azure-direct-ingestion/mq-dia-azr-direct-ingestion/notebook/landing-to-raw",
+								"baseParameters": {
+									"refine_schema": "refine",
+									"adf_database_location": "abfss://mqgmdfdev@diagmdfdevadls01.dfs.core.windows.net",
+									"landing_schema": "landing",
+									"raw_schema": "raw",
+									"refine_cnf": "refine_tables_cnf",
+									"source_cnf": "source_systems_cnf",
+									"ref_execution_table": "ref_execution",
+									"catalog": "mq_gmdf_dev",
+									"container": "mqgmdfdev",
+									"databricks_mounted_path": "mqgmdfdev",
+									"n_workers": "10",
+									"etl_job": "azure-direct-ingestion-raw",
+									"adf_run_id": {
+										"value": "@pipeline().RunId",
+										"type": "Expression"
+									},
+									"run_id": "{{run_id}}",
+									"r_src_id": {
+										"value": "@pipeline().parameters.r_src_id",
+										"type": "Expression"
+									},
+									"tables": {
+										"value": "@if(not(equals(length(variables('delta_table')),length(activity('Get List of Tables').output.value))),join(variables('delta_table'),','), if(empty(pipeline().parameters.tables),'all', join(variables('delta_table'),',')))",
+										"type": "Expression"
+									},
+									"subscription_id": "47c9e66e-5bee-4111-adee-44d9cf5d9d43",
+									"resource_group": "dev-storage-rg",
+									"storage_account": "diagmdfdevadls01"
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "dev_dia_gmdf_DataBricksWrksp_01_nb",
+								"type": "LinkedServiceReference"
+							}
+						},
+						{
+							"name": "Update Log - End NewData",
+							"type": "Lookup",
+							"dependsOn": [
+								{
+									"activity": "Landing to Raw",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.00:10:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureDatabricksDeltaLakeSource",
+									"query": {
+										"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',concat(pipeline().RunId,'_', split(activity('Landing to Raw').output.runPageUrl, 'run/')[1]),''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''COMPLETED'',''',pipeline().parameters.mode,''',''',pipeline().parameters.launch,''',getdate(),',activity('Get List of Tables').output.count,','''')')",
+										"type": "Expression"
+									}
+								},
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_delta_table",
+									"type": "DatasetReference",
+									"parameters": {
+										"DB_NAME": "refine",
+										"TB_NAME": "global_execution"
+									}
+								},
+								"firstRowOnly": false
+							}
+						},
+						{
+							"name": "Update Log - End NewData Failed",
+							"type": "Lookup",
+							"dependsOn": [
+								{
+									"activity": "Landing to Raw",
+									"dependencyConditions": [
+										"Failed"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.00:10:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureDatabricksDeltaLakeSource",
+									"query": {
+										"value": "@concat('INSERT INTO refine.global_execution (run_id,etl_job,r_src_id,start_tmstmp,load_status_cd,loading_mode,scheduling,end_tmstmp,table_processed,log_link) VALUES (''',concat(pipeline().RunId,'_', split(activity('Landing to Raw').output.runPageUrl, 'run/')[1]),''',''',pipeline().Pipeline,''',',pipeline().parameters.r_src_id,', '''',''ERROR'',''',pipeline().parameters.mode,''',''',pipeline().parameters.launch,''',getdate(),0,'''')')",
+										"type": "Expression"
+									}
+								},
+								"dataset": {
+									"referenceName": "mq_gmdf_dp_dev_delta_table",
+									"type": "DatasetReference",
+									"parameters": {
+										"DB_NAME": "refine",
+										"TB_NAME": "global_execution"
+									}
+								},
+								"firstRowOnly": false
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Fail Pipeline",
+				"type": "Fail",
+				"dependsOn": [
+					{
+						"activity": "Update Log - End Failed",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"message": {
+						"value": "@concat('Source to Raw pipeline failed for tables: ', join(variables('failed_delta_table'), ', '))",
+						"type": "Expression"
+					},
+					"errorCode": "500"
+				}
+			}
+		],
+		"parameters": {
+			"r_src_id": {
+				"type": "string"
+			},
+			"mode": {
+				"type": "string"
+			},
+			"src_cd": {
+				"type": "string"
+			},
+			"launch": {
+				"type": "String",
+				"defaultValue": "manual"
+			},
+			"tables": {
+				"type": "string"
+			}
+		},
+		"variables": {
+			"host": {
+				"type": "String"
+			},
+			"delta_table": {
+				"type": "Array"
+			},
+			"failed_delta_table": {
+				"type": "Array"
+			}
+		},
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"lastPublishTime": "2024-08-14T10:31:32Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

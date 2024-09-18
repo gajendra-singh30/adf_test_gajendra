@@ -1,0 +1,803 @@
+{
+	"name": "opic_copy_logs",
+	"properties": {
+		"activities": [
+			{
+				"name": "ReadWatermarkTable",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "ReadSourceConnectionDetails",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SqlServerSource",
+						"sqlReaderQuery": "select * from tbl_watermark where isActive = 1",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "opic_dia_log_tables",
+						"type": "DatasetReference",
+						"parameters": {
+							"server": {
+								"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].server",
+								"type": "Expression"
+							},
+							"database": {
+								"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].database",
+								"type": "Expression"
+							},
+							"username": {
+								"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].username",
+								"type": "Expression"
+							},
+							"secret": {
+								"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].secret",
+								"type": "Expression"
+							}
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEachTable",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "ReadWatermarkTable",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('ReadWatermarkTable').output.value",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "If Delta or Full Load",
+							"type": "IfCondition",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@equals(item().LoadType,'DELTA')",
+									"type": "Expression"
+								},
+								"ifFalseActivities": [
+									{
+										"name": "CopyFullData",
+										"type": "Copy",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.12:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "SqlServerSource",
+												"sqlReaderQuery": {
+													"value": "@item().sourceQuery",
+													"type": "Expression"
+												},
+												"queryTimeout": "02:00:00",
+												"partitionOption": "None"
+											},
+											"sink": {
+												"type": "ParquetSink",
+												"storeSettings": {
+													"type": "AzureBlobFSWriteSettings"
+												},
+												"formatSettings": {
+													"type": "ParquetWriteSettings"
+												}
+											},
+											"enableStaging": false,
+											"translator": {
+												"type": "TabularTranslator",
+												"typeConversion": true,
+												"typeConversionSettings": {
+													"allowDataTruncation": true,
+													"treatBooleanAsNumber": false
+												}
+											}
+										},
+										"inputs": [
+											{
+												"referenceName": "opic_dia_log_tables",
+												"type": "DatasetReference",
+												"parameters": {
+													"server": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].server",
+														"type": "Expression"
+													},
+													"database": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].database",
+														"type": "Expression"
+													},
+													"username": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].username",
+														"type": "Expression"
+													},
+													"secret": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].secret",
+														"type": "Expression"
+													}
+												}
+											}
+										],
+										"outputs": [
+											{
+												"referenceName": "opic_dia_parquet_adls",
+												"type": "DatasetReference",
+												"parameters": {
+													"filesystem": "osipi-ingestion-dev",
+													"directory": "@concat('landing/',item().TargetTableName)",
+													"fileName": "@concat(item().TargetTableName,'_',formatDateTime(utcnow(), 'yyyy-MM-dd-HH-mm-ss'),'.parquet')"
+												}
+											}
+										]
+									}
+								],
+								"ifTrueActivities": [
+									{
+										"name": "CopyIncrementalData",
+										"type": "Copy",
+										"dependsOn": [],
+										"policy": {
+											"timeout": "0.12:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "SqlServerSource",
+												"sqlReaderQuery": {
+													"value": "@item().sourceQuery",
+													"type": "Expression"
+												},
+												"queryTimeout": "02:00:00",
+												"partitionOption": "None"
+											},
+											"sink": {
+												"type": "ParquetSink",
+												"storeSettings": {
+													"type": "AzureBlobFSWriteSettings"
+												},
+												"formatSettings": {
+													"type": "ParquetWriteSettings"
+												}
+											},
+											"enableStaging": false,
+											"translator": {
+												"type": "TabularTranslator",
+												"typeConversion": true,
+												"typeConversionSettings": {
+													"allowDataTruncation": true,
+													"treatBooleanAsNumber": false
+												}
+											}
+										},
+										"inputs": [
+											{
+												"referenceName": "opic_dia_log_tables",
+												"type": "DatasetReference",
+												"parameters": {
+													"server": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].server",
+														"type": "Expression"
+													},
+													"database": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].database",
+														"type": "Expression"
+													},
+													"username": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].username",
+														"type": "Expression"
+													},
+													"secret": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].secret",
+														"type": "Expression"
+													}
+												}
+											}
+										],
+										"outputs": [
+											{
+												"referenceName": "opic_dia_parquet_adls",
+												"type": "DatasetReference",
+												"parameters": {
+													"filesystem": "osipi-ingestion-dev",
+													"directory": "@concat('landing/',item().TargetTableName)",
+													"fileName": "@concat(item().TargetTableName,'_',formatDateTime(utcnow(), 'yyyy-MM-dd-HH-mm-ss'),'.parquet')"
+												}
+											}
+										]
+									},
+									{
+										"name": "GetNewWatermarkValue",
+										"type": "Lookup",
+										"dependsOn": [
+											{
+												"activity": "CopyIncrementalData",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"timeout": "0.12:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "SqlServerSource",
+												"sqlReaderQuery": {
+													"value": "SELECT ISNULL(MAX(@{item().WatermarkColumn}),\n'@{item().WaterMarkValue}') as NewWatermarkValue\nFROM @{item().TargetTableName}",
+													"type": "Expression"
+												},
+												"queryTimeout": "02:00:00",
+												"partitionOption": "None"
+											},
+											"dataset": {
+												"referenceName": "opic_dia_log_tables",
+												"type": "DatasetReference",
+												"parameters": {
+													"server": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].server",
+														"type": "Expression"
+													},
+													"database": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].database",
+														"type": "Expression"
+													},
+													"username": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].username",
+														"type": "Expression"
+													},
+													"secret": {
+														"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].secret",
+														"type": "Expression"
+													}
+												}
+											}
+										}
+									},
+									{
+										"name": "UpdateWatermarkValue",
+										"type": "SqlServerStoredProcedure",
+										"dependsOn": [
+											{
+												"activity": "GetNewWatermarkValue",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"timeout": "0.12:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"storedProcedureName": "[dbo].[sp_watermark]",
+											"storedProcedureParameters": {
+												"maxdate": {
+													"value": {
+														"value": "@activity('GetNewWatermarkValue').output.firstRow.NewWatermarkValue",
+														"type": "Expression"
+													},
+													"type": "DateTime"
+												},
+												"tablename": {
+													"value": {
+														"value": "@item().TargetTableName",
+														"type": "Expression"
+													},
+													"type": "String"
+												}
+											}
+										},
+										"linkedServiceName": {
+											"referenceName": "opic_dia_sql_server_dev",
+											"type": "LinkedServiceReference",
+											"parameters": {
+												"server": {
+													"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].server",
+													"type": "Expression"
+												},
+												"database": {
+													"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].database",
+													"type": "Expression"
+												},
+												"username": {
+													"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].username",
+													"type": "Expression"
+												},
+												"secret": {
+													"value": "@activity('ReadSourceConnectionDetails').output.firstRow.connection['opic-dia'].secret",
+													"type": "Expression"
+												}
+											}
+										}
+									}
+								]
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "LandingToRaw",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "ForEachTable",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": "/Users/l075920-ca@llynet.com/OSI_PI_Data_Product/osipi_ingestion_process/Notebooks/3.opic_db_landing_to_raw",
+					"baseParameters": {
+						"database": {
+							"value": "@pipeline().parameters.database",
+							"type": "Expression"
+						},
+						"catalog": {
+							"value": "@pipeline().parameters.catalog",
+							"type": "Expression"
+						},
+						"storage_name": {
+							"value": "@pipeline().parameters.storage_name",
+							"type": "Expression"
+						},
+						"container": {
+							"value": "@pipeline().parameters.container",
+							"type": "Expression"
+						},
+						"run_id": {
+							"value": "@pipeline().RunId",
+							"type": "Expression"
+						},
+						"etl_job": {
+							"value": "opic_db_landing_to_raw",
+							"type": "Expression"
+						},
+						"global_log_table": {
+							"value": "@pipeline().parameters.global_log_table",
+							"type": "Expression"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "dev_dia_gmdf_DataBricksWrksp_01_nb",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Check if already running",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('select run_id, r_src_id, start_tmstmp, load_status_cd from ( select g1.run_id, g1.r_src_id, g1.start_tmstmp, g1.load_status_cd from raw.global_execution g1 join raw.global_execution g2 on g1.run_id = split_part(g2.run_id, ''_'', 1) and g1.r_src_id = g2.r_src_id and g1.etl_job = g2.etl_job where g1.r_src_id = 0 and g1.etl_job = ''', pipeline().Pipeline, ''' and g1.load_status_cd = ''RUNNING'') tb group by run_id, r_src_id, start_tmstmp, load_status_cd having count(*) = 1 order by start_tmstmp desc')\n",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Fail Current Pipeline",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Check if already running",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@if(equals(activity('Check if already running').output.count,0),false, true)",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "Fail",
+							"type": "Fail",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"message": {
+									"value": "@concat('There is already a running pipeline for the same input: ', activity('Check if already running').output.value[0].run_id)",
+									"type": "Expression"
+								},
+								"errorCode": "500"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Insert Log - Start",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Fail Current Pipeline",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''RUNNING'',''streaming'', ''delta'')')\n",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Insert log - fail",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "ReadWatermarkTable",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''ADF_PIPELINE_ERROR'',''streaming'', ''delta'')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Fail Pipeline",
+				"type": "Fail",
+				"dependsOn": [
+					{
+						"activity": "Insert log - fail",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"message": "Read from OPIC SQL DB failed",
+					"errorCode": "500"
+				}
+			},
+			{
+				"name": "Insert log - Databricks fail",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "LandingToRaw",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''DATABRICKS_NOTEBOOK_ERROR'',''streaming'', ''delta'')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Fail pipeline_2",
+				"type": "Fail",
+				"dependsOn": [
+					{
+						"activity": "Insert log - Databricks fail",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"message": "Databricks Notebook error",
+					"errorCode": "500"
+				}
+			},
+			{
+				"name": "Insert Log - End",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "LandingToRaw",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''COMPLETED'',''streaming'', ''delta'')')\n",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ReadSourceConnectionDetails",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Insert Log - Start",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "JsonSource",
+						"storeSettings": {
+							"type": "AzureBlobFSReadSettings",
+							"recursive": true,
+							"enablePartitionDiscovery": false
+						},
+						"formatSettings": {
+							"type": "JsonReadSettings"
+						}
+					},
+					"dataset": {
+						"referenceName": "opic_dia_adls_json",
+						"type": "DatasetReference",
+						"parameters": {
+							"fileSystem": "osipi-ingestion-dev",
+							"directory": "config",
+							"filename": "adf_config.json"
+						}
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "Insert log - Copy Fail",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "ForEachTable",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureDatabricksDeltaLakeSource",
+						"query": {
+							"value": "@concat('INSERT INTO raw.global_execution (run_id, etl_job, r_src_id, start_tmstmp, load_status_cd, scheduling, loading_mode) VALUES (''', pipeline().RunId, ''', ''', pipeline().Pipeline, ''', 0, ''', utcNow(), ''', ''ADF_PIPELINE_COPY_FAIL'',''streaming'', ''delta'')')",
+							"type": "Expression"
+						}
+					},
+					"dataset": {
+						"referenceName": "mq_gmdf_dp_dev_delta_table",
+						"type": "DatasetReference",
+						"parameters": {
+							"DB_NAME": "raw",
+							"TB_NAME": "global_execution"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Pipeline - Copy Fail",
+				"type": "Fail",
+				"dependsOn": [
+					{
+						"activity": "Insert log - Copy Fail",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"message": "Read from OPIC SQL DB failed",
+					"errorCode": "500"
+				}
+			}
+		],
+		"parameters": {
+			"database": {
+				"type": "string"
+			},
+			"catalog": {
+				"type": "string"
+			},
+			"storage_name": {
+				"type": "string"
+			},
+			"container": {
+				"type": "string"
+			},
+			"global_log_table": {
+				"type": "string"
+			}
+		},
+		"variables": {
+			"Server": {
+				"type": "String"
+			},
+			"Database": {
+				"type": "String"
+			},
+			"username": {
+				"type": "String"
+			},
+			"Secret": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-09-13T07:19:40Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

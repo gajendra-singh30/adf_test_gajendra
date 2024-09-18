@@ -1,0 +1,13 @@
+{
+	"name": "glb_dx_mq_gmdf_key_01",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"type": "AzureKeyVault",
+		"typeProperties": {
+			"baseUrl": "https://glb-dx-mq-gmdf-key-01.vault.azure.net/"
+		}
+	}
+}

@@ -1,0 +1,39 @@
+{
+	"name": "trigger1",
+	"properties": {
+		"annotations": [],
+		"runtimeState": "Stopped",
+		"pipelines": [
+			{
+				"pipelineReference": {
+					"referenceName": "pI_Source_to_Raw",
+					"type": "PipelineReference"
+				},
+				"parameters": {
+					"r_src_id": "181",
+					"mode": "full",
+					"src_cd": "syncade",
+					"launch": "manual"
+				}
+			}
+		],
+		"type": "ScheduleTrigger",
+		"typeProperties": {
+			"recurrence": {
+				"frequency": "Day",
+				"interval": 14,
+				"startTime": "2024-07-29T10:23:00",
+				"endTime": "2024-07-30T10:23:00",
+				"timeZone": "W. Europe Standard Time",
+				"schedule": {
+					"minutes": [
+						27
+					],
+					"hours": [
+						10
+					]
+				}
+			}
+		}
+	}
+}

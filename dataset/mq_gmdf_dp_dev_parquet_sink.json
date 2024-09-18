@@ -1,0 +1,79 @@
+{
+	"name": "mq_gmdf_dp_dev_parquet_sink",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "diagmdfdevadls01",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"FOLDER": {
+				"type": "string"
+			},
+			"SRC_SYSTEM": {
+				"type": "string"
+			}
+		},
+		"annotations": [
+			"GMDF-DP DEV Azure Direct Ingestion"
+		],
+		"type": "Parquet",
+		"typeProperties": {
+			"location": {
+				"type": "AzureBlobFSLocation",
+				"fileName": {
+					"value": "@dataset().FOLDER",
+					"type": "Expression"
+				},
+				"folderPath": {
+					"value": "@concat('landing/',dataset().SRC_SYSTEM)",
+					"type": "Expression"
+				},
+				"fileSystem": "mqgmdfdev"
+			},
+			"compressionCodec": "snappy"
+		},
+		"schema": [
+			{
+				"name": "R_CDC_TMSTMP",
+				"type": "UTF8"
+			},
+			{
+				"name": "ConnectionType",
+				"type": "INT64"
+			},
+			{
+				"name": "Step",
+				"type": "UTF8"
+			},
+			{
+				"name": "Transition",
+				"type": "UTF8"
+			},
+			{
+				"name": "StepGUID",
+				"type": "UTF8"
+			},
+			{
+				"name": "TransitionGUID",
+				"type": "UTF8"
+			},
+			{
+				"name": "AlgorithmConnectionGUID",
+				"type": "UTF8"
+			},
+			{
+				"name": "ParentGUID",
+				"type": "UTF8"
+			},
+			{
+				"name": "r_cdc_date",
+				"type": "UTF8"
+			},
+			{
+				"name": "r_src_id",
+				"type": "UTF8"
+			}
+		]
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

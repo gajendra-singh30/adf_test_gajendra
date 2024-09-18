@@ -1,0 +1,31 @@
+{
+	"name": "opic-dia-trigger",
+	"properties": {
+		"annotations": [],
+		"runtimeState": "Started",
+		"pipelines": [
+			{
+				"pipelineReference": {
+					"referenceName": "opic_copy_logs",
+					"type": "PipelineReference"
+				},
+				"parameters": {
+					"database": "raw",
+					"catalog": "mq_gmdf_dev",
+					"storage_name": "diagmdfdevadls01",
+					"container": "mqgmdfdev",
+					"global_log_table": "global_execution"
+				}
+			}
+		],
+		"type": "ScheduleTrigger",
+		"typeProperties": {
+			"recurrence": {
+				"frequency": "Hour",
+				"interval": 12,
+				"startTime": "2024-09-13T06:52:00",
+				"timeZone": "India Standard Time"
+			}
+		}
+	}
+}
